@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { Mic, MicOff, Video, VideoOff, Phone, Subtitles, Lock, Code, CheckCircle, Circle, ArrowRight } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Phone, Subtitles, Lock, Code, CheckCircle, Circle, Play, Radio } from 'lucide-react';
+import SetupModal from './components/SetupModal';
+import TestConsole from './components/TestConsole';
+import ReportDashboard from './components/ReportDashboard';
 import styles from './App.module.css';
 
 const INTERVIEW_STAGES = [
@@ -13,20 +16,32 @@ const INTERVIEW_STAGES = [
 ];
 
 function App() {
+  const [isSetupOpen, setIsSetupOpen] = useState(true);
+  const [candidateName, setCandidateName] = useState('Candidate');
+  const [track, setTrack] = useState('general');
+  const [trackName, setTrackName] = useState('General SDE Track');
   const [language, setLanguage] = useState('python');
-  const [code, setCode] = useState('class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        # Write your code here\n        return []');
+  const [code, setCode] = useState('class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        # Write your solution here\n        return []');
+  
   const [isRecording, setIsRecording] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
-  const [isEditorEnabled, setIsEditorEnabled] = useState(false); // Locked by default
+  const [isEditorEnabled, setIsEditorEnabled] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [subtitles, setSubtitles] = useState('');
   const [currentPhase, setCurrentPhase] = useState('Intro');
   
+  const [activeProblemId, setActiveProblemId] = useState('two_sum');
   const [problemHtml, setProblemHtml] = useState(null);
+  const [testResults, setTestResults] = useState(null);
+  const [isRunningCode, setIsRunningCode] = useState(false);
+  const [isSubmittingCode, setIsSubmittingCode] = useState(false);
+  
   const [timeLeft, setTimeLeft] = useState(3600); // 60 minutes in seconds
   const [isInterviewEnded, setIsInterviewEnded] = useState(false);
   const [evaluationReport, setEvaluationReport] = useState('');
+  const [reportData, setReportData] = useState(null);
+  const [durationSeconds, setDurationSeconds] = useState(0);
   
   const videoRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -35,13 +50,36 @@ function App() {
   const transcriptBufferRef = useRef('');
   const isRecordingRef = useRef(false);
 
-  useEffect(() => {
-    // Initial greeting from AI
-    const initiateInterview = async () => {
-        await handleUserAudioSubmission("", false, true);
-    };
-    initiateInterview();
+  const startInterviewSession = async (config) => {
+    setCandidateName(config.candidateName);
+    setTrack(config.track);
+    setLanguage(config.language);
+    setIsSetupOpen(false);
 
+    try {
+      const formData = new FormData();
+      formData.append('session_id', sessionIdRef.current);
+      formData.append('track', config.track);
+      formData.append('candidate_name', config.candidateName);
+      formData.append('resume_summary', config.resumeBio);
+
+      const res = await fetch('http://localhost:8000/api/setup-interview', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.track_name) {
+        setTrackName(data.track_name);
+      }
+    } catch (e) {
+      console.error('Setup interview error:', e);
+    }
+
+    // Trigger opening greeting
+    await handleUserAudioSubmission('', false, true);
+  };
+
+  useEffect(() => {
     // Setup local camera stream
     async function setupCamera() {
       try {
@@ -78,7 +116,6 @@ function App() {
             transcriptBufferRef.current += currentFinal + ' ';
         }
         
-        // Show current buffer + interim in subtitles
         setSubtitles(transcriptBufferRef.current + currentInterim);
       };
       
@@ -101,11 +138,8 @@ function App() {
       };
 
       recognitionRef.current = recognition;
-    } else {
-      console.warn("Speech Recognition API not supported in this browser.");
     }
-    
-    // Cleanup
+
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
@@ -115,7 +149,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isInterviewEnded) return;
+    if (isInterviewEnded || isSetupOpen) return;
     
     const timerId = setInterval(() => {
       setTimeLeft((prev) => {
@@ -126,10 +160,11 @@ function App() {
         }
         return prev - 1;
       });
+      setDurationSeconds((d) => d + 1);
     }, 1000);
     
     return () => clearInterval(timerId);
-  }, [isInterviewEnded]);
+  }, [isInterviewEnded, isSetupOpen]);
 
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60);
@@ -138,7 +173,6 @@ function App() {
   };
 
   const handlePushToTalk = () => {
-    // Interrupt AI speech when user starts speaking
     window.speechSynthesis.cancel();
     setIsAiSpeaking(false);
 
@@ -153,7 +187,7 @@ function App() {
       if (textToSubmit) {
           handleUserAudioSubmission(textToSubmit);
       } else if (isEditorEnabled) {
-          handleUserAudioSubmission("I've made some progress on the code. Could you please check it?");
+          handleUserAudioSubmission("I've written some code for this problem. Could you please review it?");
       } else {
           setSubtitles("");
       }
@@ -173,7 +207,7 @@ function App() {
 
   const handleUserAudioSubmission = async (transcription, isFinal = false, isInit = false) => {
     setIsProcessing(true);
-    setSubtitles("Interviewer is thinking...");
+    setSubtitles("Sanjay is thinking...");
     
     try {
       const formData = new FormData();
@@ -196,9 +230,14 @@ function App() {
           setCurrentPhase(data.current_phase);
       }
 
+      if (data.problem_id) {
+          setActiveProblemId(data.problem_id);
+      }
+
       if (isFinal || data.current_phase === 'Wrap-up') {
           if (isFinal) {
               setEvaluationReport(data.ai_response);
+              setReportData(data);
               setIsInterviewEnded(true);
           }
       }
@@ -227,7 +266,6 @@ function App() {
     const synth = window.speechSynthesis;
     synth.cancel();
     
-    // Clean markdown characters for crystal-clear natural speech
     const cleanSpeech = text.replace(/[*_#`~[\]]/g, '').trim();
     const utterance = new SpeechSynthesisUtterance(cleanSpeech);
     
@@ -240,7 +278,7 @@ function App() {
       utterance.voice = preferredVoiceRef.current;
     }
     
-    utterance.rate = 1.05; // Slightly snappier, natural conversational pace
+    utterance.rate = 1.05;
     utterance.pitch = 1.0;
     
     utterance.onstart = () => setIsAiSpeaking(true);
@@ -250,12 +288,65 @@ function App() {
     synth.speak(utterance);
   };
 
+  // Run Code against Sample Test Cases
+  const handleRunCode = async () => {
+    setIsRunningCode(true);
+    try {
+      const formData = new FormData();
+      formData.append('session_id', sessionIdRef.current);
+      formData.append('language', language);
+      formData.append('code', code);
+      formData.append('problem_id', activeProblemId);
+
+      const res = await fetch('http://localhost:8000/api/run-code', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      setTestResults(data);
+    } catch (e) {
+      console.error('Run code error:', e);
+    } finally {
+      setIsRunningCode(false);
+    }
+  };
+
+  // Submit Solution against All Test Cases & Notify AI
+  const handleSubmitSolution = async () => {
+    setIsSubmittingCode(true);
+    try {
+      const formData = new FormData();
+      formData.append('session_id', sessionIdRef.current);
+      formData.append('language', language);
+      formData.append('code', code);
+      formData.append('problem_id', activeProblemId);
+
+      const res = await fetch('http://localhost:8000/api/submit-solution', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      setTestResults(data);
+
+      // Inform the AI interviewer of the submission result
+      const promptMsg = data.all_passed 
+        ? `I have completed and submitted my solution for ${activeProblemId}. All test cases passed!`
+        : `I ran my solution for ${activeProblemId}. ${data.total_passed} out of ${data.total_tests} test cases passed.`;
+      
+      await handleUserAudioSubmission(promptMsg);
+    } catch (e) {
+      console.error('Submit solution error:', e);
+    } finally {
+      setIsSubmittingCode(false);
+    }
+  };
+
   const handleLanguageChange = (e) => {
     const selectedLang = e.target.value;
     setLanguage(selectedLang);
     
     if (selectedLang === 'cpp') {
-        setCode('#include <bits/stdc++.h>\nusing namespace std;\n\n// Write your solution here\n');
+        setCode('#include <bits/stdc++.h>\nusing namespace std;\n\nclass Solution {\npublic:\n    // Write your solution here\n};');
     } else if (selectedLang === 'java') {
         setCode('import java.util.*;\n\nclass Solution {\n    // Write your solution here\n}');
     } else if (selectedLang === 'python') {
@@ -265,7 +356,6 @@ function App() {
 
   const handleEndInterview = () => {
     if (isInterviewEnded) return;
-    
     setIsInterviewEnded(true);
     
     if (recognitionRef.current) {
@@ -273,14 +363,23 @@ function App() {
     }
     setIsRecording(false);
     
-    // Stop camera
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
     }
     
-    // Request final evaluation
-    handleUserAudioSubmission("I would like to end the interview now. Please evaluate my performance.", true);
+    handleUserAudioSubmission("I would like to end the interview now. Please evaluate my overall performance.", true);
+  };
+
+  const handleRestart = () => {
+    sessionIdRef.current = Math.random().toString(36).substring(7);
+    setIsInterviewEnded(false);
+    setEvaluationReport('');
+    setReportData(null);
+    setCurrentPhase('Intro');
+    setTimeLeft(3600);
+    setDurationSeconds(0);
+    setIsSetupOpen(true);
   };
 
   const getStageIndex = (phaseName) => {
@@ -292,9 +391,12 @@ function App() {
 
   return (
     <div className={styles.appContainer}>
+      <SetupModal isOpen={isSetupOpen} onStart={startInterviewSession} />
+
       <header className={styles.header}>
         <div className={styles.logo}>
           NxtMock <span>by NxtWave</span>
+          <span className={styles.trackPill}>{trackName}</span>
         </div>
 
         {/* Phase Progress Indicator */}
@@ -307,7 +409,7 @@ function App() {
                 key={stage.id} 
                 className={`${styles.stageBadge} ${isCurrent ? styles.stageActive : ''} ${isCompleted ? styles.stageCompleted : ''}`}
               >
-                {isCompleted ? <CheckCircle size={14} /> : <Circle size={14} />}
+                {isCompleted ? <CheckCircle size={13} /> : <Circle size={13} />}
                 <span>{stage.label}</span>
               </div>
             );
@@ -329,19 +431,14 @@ function App() {
 
       <main className={styles.mainContent}>
         {isInterviewEnded ? (
-            <section className={styles.evaluationPanel}>
-               <h2>Final Interview Evaluation</h2>
-               {isProcessing ? (
-                   <div className={styles.evalLoading}>
-                      <div className={styles.spinner}></div>
-                      <p>Sanjay is compiling your comprehensive evaluation report...</p>
-                   </div>
-               ) : (
-                   <div className={styles.reportContent}>
-                       {evaluationReport}
-                   </div>
-               )}
-            </section>
+            <ReportDashboard
+              reportData={reportData}
+              evaluationText={evaluationReport}
+              durationSeconds={durationSeconds}
+              candidateName={candidateName}
+              trackName={trackName}
+              onRestart={handleRestart}
+            />
         ) : (
             <>
         <section className={styles.problemPanel}>
@@ -349,8 +446,8 @@ function App() {
               <div dangerouslySetInnerHTML={{ __html: problemHtml }} />
           ) : (
               <div className={styles.introEmptyState}>
-                 <h2>Welcome to Your Mock Interview</h2>
-                 <p>Introduce yourself to Sanjay. The problem statement will appear here as soon as you proceed to Question 1.</p>
+                 <h2>Welcome to Your Mock Interview, {candidateName}</h2>
+                 <p>Introduce yourself to Sanjay. Your first coding challenge will appear here as soon as you transition to Question 1.</p>
               </div>
           )}
         </section>
@@ -363,7 +460,7 @@ function App() {
               onChange={handleLanguageChange}
             >
               <option value="python">Python 3</option>
-              <option value="cpp">C++14 (gcc)</option>
+              <option value="cpp">C++17 (gcc)</option>
               <option value="java">Java 17</option>
             </select>
 
@@ -393,6 +490,16 @@ function App() {
               </div>
             )}
           </div>
+
+          {/* Test Case Execution Sandbox Console */}
+          <TestConsole
+            onRunCode={handleRunCode}
+            onSubmitSolution={handleSubmitSolution}
+            isRunning={isRunningCode}
+            isSubmitting={isSubmittingCode}
+            testResults={testResults}
+            isEditorEnabled={isEditorEnabled}
+          />
           
           {/* Subtitles Overlay beneath editor */}
           {subtitles && (
@@ -422,7 +529,7 @@ function App() {
               style={{ display: isVideoOn ? 'block' : 'none' }}
             />
             {!isVideoOn && <div className={styles.cameraOffPlaceholder}>Camera Off</div>}
-            <div className={styles.videoLabel}>You {isRecording ? '🎙 Speaking' : ''}</div>
+            <div className={styles.videoLabel}>{candidateName} {isRecording ? '🎙 Speaking' : ''}</div>
           </div>
         </section>
         </>

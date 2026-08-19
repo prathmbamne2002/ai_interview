@@ -1,0 +1,250 @@
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 1.5rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 1rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+}
+
+.header h1 {
+  font-size: 1.75rem;
+  margin: 0 0 0.5rem 0;
+  color: #f8fafc;
+}
+
+.metaRow {
+  display: flex;
+  gap: 1.5rem;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.metaRow span {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.headerActions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.printBtn,
+.restartBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.printBtn {
+  background-color: #334155;
+  color: #f8fafc;
+}
+
+.printBtn:hover {
+  background-color: #475569;
+}
+
+.restartBtn {
+  background-color: #2563eb;
+  color: white;
+}
+
+.restartBtn:hover {
+  background-color: #1d4ed8;
+}
+
+.recBanner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid;
+}
+
+.recHire {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: #10b981;
+  color: #34d399;
+}
+
+.recNoHire {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: #ef4444;
+  color: #f87171;
+}
+
+.recLabel {
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.recValue {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.scoreGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.scoreCard {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scoreOverall {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #1e293b, #1e3a8a);
+}
+
+.scoreHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.scoreIcon {
+  color: #60a5fa;
+}
+
+.scoreNum {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.scoreNum span {
+  font-size: 0.9rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.progressBar {
+  height: 6px;
+  background-color: #0f172a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #10b981);
+  border-radius: 3px;
+}
+
+.testSection,
+.reportSection {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+
+.testSection h3,
+.reportSection h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #f1f5f9;
+}
+
+.testGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.testBox {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.testBoxTitle {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+  margin-bottom: 0.35rem;
+}
+
+.testBoxStats {
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.testBoxStats strong {
+  color: #34d399;
+}
+
+.feedbackBody {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: #cbd5e1;
+  font-size: 0.95rem;
+  background-color: #0f172a;
+  padding: 1.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid #334155;
+}
+
+@media print {
+  .headerActions {
+    display: none;
+  }
+  .container {
+    padding: 0;
+    max-width: 100%;
+  }
+}

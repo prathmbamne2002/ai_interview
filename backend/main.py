@@ -1,7 +1,8 @@
 import os
 import json
 import random
-from fastapi import FastAPI, Form, HTTPException
+import time
+from fastapi import FastAPI, Form, HTTPException, WebSocket, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -9,9 +10,13 @@ import motor.motor_asyncio
 from google import genai
 from google.genai import types
 
+from sandbox import execute_code_piston, evaluate_test_cases
+from problems_db import PROBLEMS, COMPANY_TRACKS, get_track_problems
+from live_gateway import handle_live_interview_ws
+
 load_dotenv()
 
-app = FastAPI()
+app = FastAPI(title="AI Mock Interview Platform Backend")
 
 # Allow CORS for the frontend
 app.add_middleware(
@@ -40,181 +45,191 @@ else:
     print("Warning: GEMINI_API_KEY not found. AI responses will fail.")
     genai_client = None
 
-# In-memory storage for session state
+# In-memory storage for active sessions
 sessions = {}
 
-QUESTION_1_POOL = [
-    {
-        "title": "Two Sum",
-        "difficulty": "Easy",
-        "html": '''<h2 class="problemTitle">Question 1: Two Sum</h2>
-<div class="problemText">
-    <p>Given an array of integers <span class="codeBlock">nums</span> and an integer <span class="codeBlock">target</span>, return indices of the two numbers such that they add up to <span class="codeBlock">target</span>.</p>
-    <p>You may assume that each input would have <strong>exactly one solution</strong>, and you may not use the same element twice.</p>
-    <p>You can return the answer in any order.</p>
-    <h3>Sample Input 1:</h3>
-    <div class="sampleBox">nums = [2,7,11,15], target = 9</div>
-    <h3>Expected Output 1:</h3>
-    <div class="sampleBox">[0,1]</div>
-</div>''',
-        "starter_code": {
-            "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nvector<int> twoSum(vector<int>& nums, int target) {\n    // Write your solution here\n    return {};\n}",
-            "java": "import java.util.*;\n\nclass Solution {\n    public int[] twoSum(int[] nums, int target) {\n        // Write your solution here\n        return new int[]{};\n    }\n}",
-            "python": "class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        # Write your solution here\n        return []"
-        }
-    },
-    {
-        "title": "Stable Subarrays With Equal Boundary",
-        "difficulty": "Medium",
-        "html": '''<h2 class="problemTitle">Question 1: Stable Subarrays With Equal Boundary</h2>
-<div class="problemText">
-    <p>You are given an integer array <span class="codeBlock">capacity</span>.</p>
-    <p>A subarray is considered <strong>stable</strong> if:</p>
-    <ul>
-        <li>Its length is at least <span class="codeBlock">3</span>, and</li>
-        <li>The <strong>first</strong> and <strong>last</strong> elements are each equal to the <strong>sum of all elements strictly between them</strong>.</li>
-    </ul>
-    <p>Your task is to return the total number of stable subarrays in the given array.</p>
-    <h3>Sample Input 1:</h3>
-    <div class="sampleBox">9 3 3 3 9</div>
-    <h3>Expected Output 1:</h3>
-    <div class="sampleBox">2</div>
-</div>''',
-        "starter_code": {
-            "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nlong long countStableSubarrays(vector<long long>& capacity) {\n    // Write your code here.\n    return 0;\n}",
-            "java": "class Solution {\n    public long countStableSubarrays(int[] capacity) {\n        // Write your code here.\n        return 0;\n    }\n}",
-            "python": "class Solution:\n    def countStableSubarrays(self, capacity: list[int]) -> int:\n        # Write your code here.\n        return 0"
-        }
-    }
-]
-
-QUESTION_2_POOL = [
-    {
-        "title": "Merge Intervals",
-        "difficulty": "Medium",
-        "html": '''<h2 class="problemTitle">Question 2: Merge Intervals</h2>
-<div class="problemText">
-    <p>Given an array of <span class="codeBlock">intervals</span> where <span class="codeBlock">intervals[i] = [start_i, end_i]</span>, merge all overlapping intervals, and return an array of the non-overlapping intervals that cover all the intervals in the input.</p>
-    <h3>Sample Input 1:</h3>
-    <div class="sampleBox">intervals = [[1,3],[2,6],[8,10],[15,18]]</div>
-    <h3>Expected Output 1:</h3>
-    <div class="sampleBox">[[1,6],[8,10],[15,18]]</div>
-</div>''',
-        "starter_code": {
-            "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nvector<vector<int>> merge(vector<vector<int>>& intervals) {\n    // Write your solution here\n    return {};\n}",
-            "java": "import java.util.*;\n\nclass Solution {\n    public int[][] merge(int[][] intervals) {\n        // Write your solution here\n        return new int[][]{};\n    }\n}",
-            "python": "class Solution:\n    def merge(self, intervals: list[list[int]]) -> list[list[int]]:\n        # Write your solution here\n        return []"
-        }
-    },
-    {
-        "title": "Longest Substring Without Repeating Characters",
-        "difficulty": "Medium",
-        "html": '''<h2 class="problemTitle">Question 2: Longest Substring Without Repeating Characters</h2>
-<div class="problemText">
-    <p>Given a string <span class="codeBlock">s</span>, find the length of the <strong>longest substring</strong> without repeating characters.</p>
-    <h3>Sample Input 1:</h3>
-    <div class="sampleBox">s = "abcabcbb"</div>
-    <h3>Expected Output 1:</h3>
-    <div class="sampleBox">3</div>
-    <p>Explanation: The answer is "abc", with the length of 3.</p>
-</div>''',
-        "starter_code": {
-            "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint lengthOfLongestSubstring(string s) {\n    // Write your solution here\n    return 0;\n}",
-            "java": "import java.util.*;\n\nclass Solution {\n    public int lengthOfLongestSubstring(String s) {\n        // Write your solution here\n        return 0;\n    }\n}",
-            "python": "class Solution:\n    def lengthOfLongestSubstring(self, s: str) -> int:\n        # Write your solution here\n        return 0"
-        }
-    }
-]
-
 class InterviewSession:
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, track: str = "general", candidate_name: str = "Candidate", resume_summary: str = ""):
         self.session_id = session_id
+        self.track = track
+        self.candidate_name = candidate_name
+        self.resume_summary = resume_summary
         self.current_phase = "Intro"
-        self.q1 = random.choice(QUESTION_1_POOL)
-        self.q2 = random.choice(QUESTION_2_POOL)
+        self.active_problem_id = None
+        
+        q1, q2, track_cfg = get_track_problems(track)
+        self.q1 = q1
+        self.q2 = q2
+        self.track_name = track_cfg["name"]
+        
         self.history = [] # Stores {"role": "user"|"model", "content": text}
+        self.q1_code = ""
+        self.q2_code = ""
+        self.test_stats = {"q1_passed": 0, "q1_total": 0, "q2_passed": 0, "q2_total": 0}
+        self.start_time = time.time()
 
 @app.get("/")
 def read_root():
-    return {"message": "AI Interview Backend is running"}
+    return {"message": "AI Interview Backend is running", "live_api": True, "sandbox": True}
+
+@app.get("/api/tracks")
+def get_tracks():
+    """Returns available company interview tracks."""
+    return {
+        "tracks": [
+            {
+                "id": k,
+                "name": v["name"],
+                "description": v["description"]
+            }
+            for k, v in COMPANY_TRACKS.items()
+        ]
+    }
+
+@app.post("/api/setup-interview")
+def setup_interview(
+    session_id: str = Form(...),
+    track: str = Form("general"),
+    candidate_name: str = Form("Candidate"),
+    resume_summary: str = Form("")
+):
+    """Initializes or resets a tailored interview session."""
+    session = InterviewSession(
+        session_id=session_id,
+        track=track,
+        candidate_name=candidate_name,
+        resume_summary=resume_summary
+    )
+    sessions[session_id] = session
+    
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "track": track,
+        "track_name": session.track_name,
+        "q1_title": session.q1["title"],
+        "q2_title": session.q2["title"]
+    }
+
+@app.post("/api/run-code")
+def run_code(
+    session_id: str = Form(...),
+    language: str = Form("python"),
+    code: str = Form(...),
+    problem_id: str = Form(...)
+):
+    """Runs candidate code against visible sample test cases."""
+    problem = PROBLEMS.get(problem_id)
+    if not problem:
+        # Fallback to direct execution
+        return execute_code_piston(language, code)
+        
+    test_cases = problem.get("sample_test_cases", [])
+    results = evaluate_test_cases(language, code, test_cases, problem_id)
+    return results
+
+@app.post("/api/submit-solution")
+def submit_solution(
+    session_id: str = Form(...),
+    language: str = Form("python"),
+    code: str = Form(...),
+    problem_id: str = Form(...)
+):
+    """Runs candidate code against hidden test cases for evaluation."""
+    session = sessions.get(session_id)
+    problem = PROBLEMS.get(problem_id)
+    if not problem:
+        return {"error": "Problem not found"}
+        
+    all_tests = problem.get("sample_test_cases", []) + problem.get("hidden_test_cases", [])
+    results = evaluate_test_cases(language, code, all_tests, problem_id)
+    
+    if session:
+        if problem_id == session.q1["id"]:
+            session.q1_code = code
+            session.test_stats["q1_passed"] = results["total_passed"]
+            session.test_stats["q1_total"] = results["total_tests"]
+        elif problem_id == session.q2["id"]:
+            session.q2_code = code
+            session.test_stats["q2_passed"] = results["total_passed"]
+            session.test_stats["q2_total"] = results["total_tests"]
+            
+    return results
 
 def construct_system_prompt(session: InterviewSession, code: str, language: str, is_final: bool) -> str:
-    """Builds the system prompt for a realistic 2-question technical DSA interview."""
+    """Builds the comprehensive system prompt for the 2-question interview."""
     if is_final:
-        return f"""You are Sanjay, a Senior Technical Interviewer concluding the interview.
-Current Phase: Wrap-up
+        return f"""You are Sanjay, a Senior Technical Interviewer at a top tech company concluding the interview.
+Track: {session.track_name}
+Candidate Name: {session.candidate_name}
 Candidate Language: {language}
 Final Code in Editor:
 ```{language}
 {code}
 ```
 
-Provide a comprehensive, encouraging evaluation report analyzing the candidate's performance across:
-1. Problem Solving & Algorithms (Accuracy, Optimization)
-2. Code Quality & Syntax (Cleanliness, Modularity)
-3. Communication & Complexity Analysis (Clarity, Edge Cases)
-4. Overall Recommendation (Strong Hire / Hire / Lean Hire / No Hire)
+Test Cases Stats:
+- Question 1 ({session.q1['title']}): {session.test_stats['q1_passed']}/{session.test_stats['q1_total']} passed
+- Question 2 ({session.q2['title']}): {session.test_stats['q2_passed']}/{session.test_stats['q2_total']} passed
 
-Output your response strictly as JSON:
+Evaluate their full interview performance across:
+1. Problem Solving & Algorithmic Optimization (Score /100)
+2. Code Quality, Syntax & Modularity (Score /100)
+3. Communication, Complexity Analysis & Edge Cases (Score /100)
+4. Final Hiring Recommendation (Strong Hire / Hire / Lean Hire / No Hire)
+
+Output ONLY valid JSON:
 {{
-    "ai_response": "Full detailed final evaluation report text...",
+    "ai_response": "Detailed, encouraging performance evaluation summary...",
     "current_phase": "Wrap-up",
     "editor_unlocked": false,
     "problem_html": null,
-    "starter_code": null
+    "starter_code": null,
+    "scores": {{
+        "problem_solving": 85,
+        "code_quality": 80,
+        "communication": 90,
+        "overall": 85
+    }},
+    "recommendation": "Hire"
 }}
 """
 
-    return f"""You are Sanjay, a Senior Technical Interviewer conducting a realistic, interactive live DSA technical interview.
+    active_problem = session.q2 if session.current_phase in ["Question 2", "Question 2 Follow-up"] else session.q1
+    session.active_problem_id = active_problem["id"]
 
-INTERVIEW SPECIFICATION & TIMELINE:
-You MUST follow this exact 5-stage interview pipeline:
-1. Intro Phase:
-   - Greet the candidate warmly and ask EXACTLY ONE brief background question (e.g., their background, tech stack, or favorite project).
-   - As soon as the candidate answers, acknowledge it warmly and IMMEDIATELY transition to "Question 1".
+    return f"""You are Sanjay, an expert Senior Technical Interviewer conducting a realistic live DSA interview on the {session.track_name} track.
+Candidate Name: {session.candidate_name}
+Candidate Background / Resume: {session.resume_summary or 'Computer Science / Software Engineering'}
 
-2. Question 1 Phase: Problem: "{session.q1['title']}"
-   - Introduce Question 1 and ask the candidate to explain their high-level approach before/while writing code.
-   - Unlock the editor.
-   - Once the candidate writes the solution or explains a valid approach, acknowledge it and transition to "Question 1 Follow-up".
-
-3. Question 1 Follow-up Phase:
-   - Ask about Time Complexity, Space Complexity (Big-O), and edge cases (e.g. negative numbers, empty arrays, duplicates).
-   - Once the candidate answers the follow-up questions, acknowledge their answer and IMMEDIATELY transition to "Question 2".
-
-4. Question 2 Phase: Problem: "{session.q2['title']}"
-   - Present Question 2 and invite the candidate to solve it in the editor.
-   - Once solved or discussed, transition to "Question 2 Follow-up".
-
-5. Question 2 Follow-up Phase:
-   - Ask a scaling or optimization question (e.g., memory limits, streaming inputs, alternative data structures).
-   - Once answered or if candidate is ready, transition to "Wrap-up".
-
-6. Wrap-up Phase:
-   - Conclude the interview professionally. Provide clear, structured feedback on Problem Solving, Code Quality, and Communication.
+INTERVIEW TIMELINE:
+1. Intro Phase: Greet candidate by name, ask 1 brief background question (e.g. favorite projects or experience). When answered, acknowledge and transition to "Question 1".
+2. Question 1 ({session.q1['title']}): Present problem 1, ask candidate to explain their high-level approach before/while writing code. Unlock editor.
+3. Question 1 Follow-up: Ask about Time & Space Complexity (Big-O) and edge cases. When answered, transition to "Question 2".
+4. Question 2 ({session.q2['title']}): Present problem 2, guide candidate to solve it.
+5. Question 2 Follow-up: Ask scaling, streaming, or optimization follow-up. When answered, transition to "Wrap-up".
+6. Wrap-up: Conclude with encouraging high-level feedback.
 
 CURRENT STATE:
-- Current Phase: {session.current_phase}
-- Candidate Language: {language}
-- Current Code in Editor:
+- Phase: {session.current_phase}
+- Language: {language}
+- Editor Code:
 ```{language}
 {code}
 ```
 
 CONVERSATIONAL RULES:
-- Speak like a REAL HUMAN interviewer in a live call.
-- Keep your 'ai_response' SHORT and natural (1 to 3 sentences maximum).
-- Never output huge monologues. Ask one question or prompt at a time.
-- Be encouraging, professional, and clear.
+- Speak naturally like a real human interviewer (1-3 sentences maximum per turn).
+- Be supportive, clear, and focused.
 
-OUTPUT SCHEMA:
-You MUST output ONLY a valid JSON object matching this schema:
+OUTPUT SCHEMA (JSON ONLY):
 {{
-    "ai_response": "The spoken words for the candidate (1-3 conversational sentences)",
+    "ai_response": "Spoken text for the candidate (1-3 sentences)",
     "current_phase": "Intro" | "Question 1" | "Question 1 Follow-up" | "Question 2" | "Question 2 Follow-up" | "Wrap-up",
     "editor_unlocked": true/false,
-    "problem_html": "HTML problem statement if introducing Question 1 or Question 2, otherwise null",
-    "starter_code": "Starter code string if introducing Question 1 or Question 2 for the chosen language, otherwise null"
+    "problem_id": "{session.q1['id']}" | "{session.q2['id']}" | null,
+    "problem_html": "HTML if presenting Q1 or Q2, otherwise null",
+    "starter_code": "Starter code if presenting Q1 or Q2, otherwise null"
 }}
 """
 
@@ -233,16 +248,17 @@ def submit_text(
         sessions[session_id] = InterviewSession(session_id)
         
     session = sessions[session_id]
+    is_final_flag = is_final is True or str(is_final).lower() in ["true", "1"]
     
     # Handle initial vs ongoing user message
     user_message = transcription.strip()
     if not session.history and not user_message:
-        user_message = "Hi, I am ready to start the interview."
+        user_message = f"Hi Sanjay, I am {session.candidate_name} and I am ready to start the interview."
         
     if user_message:
         session.history.append({"role": "user", "content": user_message})
     
-    # Construct Gemini contents array (limit to last 10 messages for ultra-fast latency)
+    # Keep last 10 messages for low latency
     contents = []
     recent_history = session.history[-10:] if len(session.history) > 10 else session.history
     for msg in recent_history:
@@ -253,11 +269,8 @@ def submit_text(
             )
         )
     
-    is_final_flag = is_final is True or str(is_final).lower() in ["true", "1"]
-    
     system_prompt = construct_system_prompt(session, code, language, is_final_flag)
     
-    # Fast Gemini generation with thinking_budget=0
     models_to_try = ['gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-3.5-flash']
     parsed_response = None
     spoken_response = ""
@@ -276,10 +289,10 @@ def submit_text(
                 config=config
             )
             parsed_response = json.loads(response.text)
-            spoken_response = parsed_response.get("ai_response", "Let's continue with the problem.")
+            spoken_response = parsed_response.get("ai_response", "Let's continue.")
             break
         except Exception as e:
-            print(f"Error with model {model_name}: {e}")
+            print(f"Model {model_name} error: {e}")
             continue
             
     if not parsed_response:
@@ -303,25 +316,76 @@ def submit_text(
         # When entering Question 1
         if new_phase == "Question 1" and prev_phase != "Question 1":
             parsed_response["editor_unlocked"] = True
+            parsed_response["problem_id"] = session.q1["id"]
             parsed_response["problem_html"] = session.q1["html"]
             parsed_response["starter_code"] = session.q1["starter_code"].get(language, session.q1["starter_code"]["python"])
+            parsed_response["sample_test_cases"] = session.q1.get("sample_test_cases", [])
             
         # When entering Question 2
         elif new_phase == "Question 2" and prev_phase != "Question 2":
             parsed_response["editor_unlocked"] = True
+            parsed_response["problem_id"] = session.q2["id"]
             parsed_response["problem_html"] = session.q2["html"]
             parsed_response["starter_code"] = session.q2["starter_code"].get(language, session.q2["starter_code"]["python"])
+            parsed_response["sample_test_cases"] = session.q2.get("sample_test_cases", [])
             
-        # During any active coding or follow-up phase, ensure editor stays unlocked
+        # Ensure active coding phases keep editor unlocked
         if new_phase in ["Question 1", "Question 1 Follow-up", "Question 2", "Question 2 Follow-up"]:
             parsed_response["editor_unlocked"] = True
         elif new_phase in ["Intro", "Wrap-up"]:
             parsed_response["editor_unlocked"] = False
 
-    # Store AI response in history
     session.history.append({"role": "model", "content": spoken_response})
     
+    # If final or wrap-up, save report to MongoDB
+    if (is_final_flag or new_phase == "Wrap-up") and reports_collection:
+        try:
+            report_doc = {
+                "session_id": session_id,
+                "candidate_name": session.candidate_name,
+                "track": session.track,
+                "track_name": session.track_name,
+                "q1_title": session.q1["title"],
+                "q2_title": session.q2["title"],
+                "q1_code": session.q1_code or code,
+                "q2_code": session.q2_code,
+                "test_stats": session.test_stats,
+                "evaluation_report": spoken_response,
+                "scores": parsed_response.get("scores", {"problem_solving": 85, "code_quality": 80, "communication": 85, "overall": 83}),
+                "recommendation": parsed_response.get("recommendation", "Hire"),
+                "duration_seconds": int(time.time() - session.start_time),
+                "created_at": time.time()
+            }
+            # Asynchronously save to MongoDB
+            import asyncio
+            asyncio.create_task(reports_collection.update_one(
+                {"session_id": session_id},
+                {"$set": report_doc},
+                upsert=True
+            ))
+        except Exception as e:
+            print(f"Failed to save MongoDB report: {e}")
+
     return parsed_response
+
+@app.get("/api/reports/{session_id}")
+async def get_report(session_id: str):
+    """Retrieves saved evaluation report from MongoDB."""
+    if not reports_collection:
+        raise HTTPException(status_code=404, detail="Database not configured")
+        
+    doc = await reports_collection.find_one({"session_id": session_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return doc
+
+@app.websocket("/ws/live-interview")
+async def live_interview_ws(websocket: WebSocket, session_id: str = "default"):
+    """WebSocket endpoint for live bidirectional voice interaction."""
+    if not genai_client:
+        await websocket.close(code=1008)
+        return
+    await handle_live_interview_ws(websocket, session_id, genai_client, sessions)
 
 if __name__ == "__main__":
     import uvicorn
